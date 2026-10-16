@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: onsale
+      POSTGRES_USER: onsale
+      POSTGRES_PASSWORD: onsale
+    ports: ["5433:5432"]   # 5432 is taken by a native Postgres on the dev machine
+    volumes: [pgdata:/var/lib/postgresql/data]
+volumes:
+  pgdata:

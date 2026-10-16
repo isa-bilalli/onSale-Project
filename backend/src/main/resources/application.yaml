@@ -1,3 +1,11 @@
 spring:
   application:
     name: onsale
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/onsale}
+    username: ${DB_USER:onsale}
+    password: ${DB_PASSWORD:onsale}
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Flyway owns the schema; Hibernate only checks it
+    open-in-view: false
