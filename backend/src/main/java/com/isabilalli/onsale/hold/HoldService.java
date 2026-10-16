@@ -49,11 +49,12 @@ public class HoldService {
 
 		UUID holdId = UUID.randomUUID();
 		OffsetDateTime expiresAt = jdbc.sql("""
-				insert into hold (id, event_id, expires_at)
-				values (:id, :eventId, now() + make_interval(secs => :seconds))
+				insert into hold (id, event_id, seat_count, expires_at)
+				values (:id, :eventId, :seatCount, now() + make_interval(secs => :seconds))
 				returning expires_at""")
 			.param("id", holdId)
 			.param("eventId", eventId)
+			.param("seatCount", seatIds.size())
 			.param("seconds", holdDuration.toSeconds())
 			.query(OffsetDateTime.class)
 			.single();
@@ -75,6 +76,66 @@ public class HoldService {
 		}
 
 		return new HoldResponse(holdId, eventId, seatIds, expiresAt.toInstant());
+	}
+
+	/**
+	 * Sells a hold's seats. Idempotent per key: retrying with the key that confirmed the hold returns the same
+	 * result; any other key gets {@link HoldAlreadyConfirmedException}.
+	 */
+	@Transactional
+	public CheckoutResponse checkout(UUID holdId, String idempotencyKey) {
+		// Locking the hold row serializes concurrent checkouts of this hold and the sweeper expiring it:
+		// whoever comes second sees the first one's outcome.
+		HoldRow hold = jdbc.sql("""
+				select event_id, status, seat_count, checkout_key, confirmed_at, expires_at <= now() as expired
+				from hold where id = :id for update""")
+			.param("id", holdId)
+			.query((rs, n) -> new HoldRow(rs.getObject("event_id", UUID.class), rs.getString("status"),
+					rs.getInt("seat_count"), rs.getString("checkout_key"),
+					rs.getObject("confirmed_at", OffsetDateTime.class), rs.getBoolean("expired")))
+			.optional()
+			.orElseThrow(() -> new HoldNotFoundException(holdId));
+
+		if ("CONFIRMED".equals(hold.status())) {
+			if (!hold.checkoutKey().equals(idempotencyKey)) {
+				throw new HoldAlreadyConfirmedException();
+			}
+			return checkoutResponse(holdId, hold.eventId(), hold.confirmedAt());
+		}
+		if ("EXPIRED".equals(hold.status()) || hold.expired()) {
+			throw new HoldExpiredException();
+		}
+
+		// A seat whose hold ran out may already belong to another buyer. Selling fewer seats than the
+		// hold claimed means exactly that, and the exception rolls the partial sale back.
+		int sold = jdbc.sql("update seat set status = 'SOLD', held_until = null where hold_id = :id and status = 'HELD'")
+			.param("id", holdId)
+			.update();
+		if (sold != hold.seatCount()) {
+			throw new HoldExpiredException();
+		}
+
+		OffsetDateTime confirmedAt = jdbc.sql("""
+				update hold set status = 'CONFIRMED', checkout_key = :key, confirmed_at = now()
+				where id = :id
+				returning confirmed_at""")
+			.param("id", holdId)
+			.param("key", idempotencyKey)
+			.query(OffsetDateTime.class)
+			.single();
+		return checkoutResponse(holdId, hold.eventId(), confirmedAt);
+	}
+
+	private CheckoutResponse checkoutResponse(UUID holdId, UUID eventId, OffsetDateTime confirmedAt) {
+		List<UUID> seatIds = jdbc.sql("select id from seat where hold_id = :id and status = 'SOLD' order by id")
+			.param("id", holdId)
+			.query(UUID.class)
+			.list();
+		return new CheckoutResponse(holdId, eventId, seatIds, "CONFIRMED", confirmedAt.toInstant());
+	}
+
+	private record HoldRow(UUID eventId, String status, int seatCount, String checkoutKey,
+			OffsetDateTime confirmedAt, boolean expired) {
 	}
 
 }

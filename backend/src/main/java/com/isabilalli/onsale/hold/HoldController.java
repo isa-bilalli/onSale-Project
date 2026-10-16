@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -24,6 +25,11 @@ class HoldController {
 	ResponseEntity<HoldResponse> create(@PathVariable UUID eventId, @Valid @RequestBody CreateHoldRequest request) {
 		HoldResponse hold = holds.create(eventId, request.seatIds());
 		return ResponseEntity.created(URI.create("/holds/" + hold.holdId())).body(hold);
+	}
+
+	@PostMapping("/holds/{holdId}/checkout")
+	CheckoutResponse checkout(@PathVariable UUID holdId, @RequestHeader("Idempotency-Key") String idempotencyKey) {
+		return holds.checkout(holdId, idempotencyKey);
 	}
 
 }

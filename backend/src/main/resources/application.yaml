@@ -13,3 +13,4 @@ spring:
 onsale:
   hold:
     duration: 5m
+    sweep-interval: 30s
