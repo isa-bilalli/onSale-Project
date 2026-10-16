@@ -9,3 +9,7 @@ spring:
     hibernate:
       ddl-auto: validate   # Flyway owns the schema; Hibernate only checks it
     open-in-view: false
+
+onsale:
+  hold:
+    duration: 5m
